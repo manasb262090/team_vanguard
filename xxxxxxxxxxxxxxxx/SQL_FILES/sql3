@@ -1,0 +1,29 @@
+-- =====================================================================
+-- Connect Web : PATCH v3
+-- Run LAST after sqlv1 and sqlv2. Handles signup permissions and defaults.
+-- =====================================================================
+
+-- 1. Allow unauthenticated users to see branches during signup
+create policy branches_public_read on branches
+  for select to anon, authenticated using (true);
+
+-- 2. Allow teachers to verify or reject student accounts
+create policy teacher_verify_students on profiles
+  for update
+  using (my_role() = 'teacher' and role = 'student')
+  with check (role = 'student');
+
+-- 3. Seed default college branches
+insert into branches (name, code) values
+  ('Computer Science', 'CSE'),
+  ('Information Technology', 'IT'),
+  ('Electronics and Communication', 'ECE'),
+  ('Mechanical', 'ME'),
+  ('Civil', 'CE')
+on conflict (code) do nothing;
+
+-- 4. MAKE YOURSELF THE FIRST ADMIN
+--    Sign up inside your frontend app first, then run this line with your email:
+--
+-- update profiles set role = 'admin', status = 'verified'
+-- where email = 'your-email@example.com';
