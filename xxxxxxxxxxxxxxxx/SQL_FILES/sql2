@@ -1,0 +1,273 @@
+-- =====================================================================
+-- Connect Web : schema ADD-ON (v2 - Fixed)
+-- Run AFTER sqlv1. Adds attendance, notifications, grading, and counseling.
+-- =====================================================================
+create extension if not exists pg_trgm;
+
+-- ---------- 1. PROFILE FLAG FOR COUNSELLORS ----------
+alter table profiles
+add column if not exists is_counsellor boolean not null default false;
+
+drop policy if exists profiles_update_self on profiles;
+
+create policy profiles_update_self on profiles
+for update
+  using (id = auth.uid ())
+with
+  check (
+    id = auth.uid ()
+    and role = (
+      select
+        role
+      from
+        profiles
+      where
+        id = auth.uid ()
+    )
+    and status = (
+      select
+        status
+      from
+        profiles
+      where
+        id = auth.uid ()
+    )
+    and is_counsellor = (
+      select
+        is_counsellor
+      from
+        profiles
+      where
+        id = auth.uid ()
+    )
+  );
+
+-- ---------- 2. NOTIFICATIONS ----------
+create table if not exists notifications (
+  id uuid primary key default gen_random_uuid (),
+  user_id uuid not null references profiles (id) on delete cascade,
+  kind text not null,
+  title text not null,
+  body text,
+  link text,
+  is_read boolean not null default false,
+  created_at timestamptz default now()
+);
+
+create index on notifications (user_id, is_read, created_at desc);
+
+alter table notifications enable row level security;
+
+create policy notif_read on notifications for
+select
+  using (user_id = auth.uid ());
+
+create policy notif_update on notifications
+for update
+  using (user_id = auth.uid ())
+with
+  check (user_id = auth.uid ());
+
+create or replace function
+notify (
+  p_user uuid,
+  p_kind text,
+  p_title text,
+  p_body text,
+  p_link text
+) returns void language sql security definer
+set
+  search_path = public as $$insert into notifications (user_id, kind, title, body, link) values (p_user, p_kind, p_title, p_body, p_link)$$;
+
+-- ---------- 3. ATTENDANCE ----------
+create table attendance_sessions (
+  id uuid primary key default gen_random_uuid (),
+  subject_id uuid not null references subjects (id) on delete cascade,
+  held_on date not null default current_date,
+  topic text,
+  marked_by uuid references profiles (id),
+  unique (subject_id, held_on, topic)
+);
+
+create table attendance_records (
+  session_id uuid references attendance_sessions (id) on delete cascade,
+  student_id uuid references profiles (id) on delete cascade,
+  present boolean not null,
+  primary key (session_id, student_id)
+);
+
+create index on attendance_records (student_id);
+
+create view attendance_summary as
+select
+  r.student_id,
+  s.subject_id,
+  sub.name as subject,
+  count(*) as total_classes,
+  count(*) filter (
+    where
+      r.present
+  ) as attended,
+  round(
+    100.0 * count(*) filter (
+      where
+        r.present
+    ) / count(*),
+    1
+  ) as percentage,
+  case
+    when 100.0 * count(*) filter (
+      where
+        r.present
+    ) / count(*) >= 75 then 'safe'
+    when 100.0 * count(*) filter (
+      where
+        r.present
+    ) / count(*) >= 65 then 'warning'
+    else 'critical'
+  end as status,
+  greatest(
+    0,
+    ceil(
+      (
+        0.75 * count(*) - count(*) filter (
+          where
+            r.present
+        )
+      ) / 0.25
+    )
+  )::int as classes_to_recover
+from
+  attendance_records r
+  join attendance_sessions s on s.id = r.session_id
+  join subjects sub on sub.id = s.subject_id
+group by
+  r.student_id,
+  s.subject_id,
+  sub.name;
+
+alter table attendance_sessions enable row level security;
+
+alter table attendance_records enable row level security;
+
+create policy as_read on attendance_sessions for
+select
+  using (is_verified ());
+
+create policy as_write on attendance_sessions for all using (my_role () in ('teacher', 'admin'))
+with
+  check (my_role () in ('teacher', 'admin'));
+
+create policy ar_read on attendance_records for
+select
+  using (
+    student_id = auth.uid ()
+    or my_role () in ('teacher', 'admin')
+  );
+
+create policy ar_write on attendance_records for all using (my_role () in ('teacher', 'admin'))
+with
+  check (my_role () in ('teacher', 'admin'));
+
+create or replace function check_attendance_warning () returns trigger language plpgsql security definer
+set
+  search_path = public as $$ declare subj uuid; subj_name text; pct numeric; need int; begin select s.subject_id, sub.name into subj, subj_name from attendance_sessions s join subjects sub on sub.id = s.subject_id where s.id = new.session_id;    select percentage, classes_to_recover into pct, need from attendance_summary where student_id = new.student_id and subject_id = subj;    if pct < 75 and not exists ( select 1 from notifications n where n.user_id = new.student_id and n.kind = 'attendance' and n.link = '/attendance/' || subj and n.created_at::date = current_date) then perform notify(new.student_id, 'attendance', 'Low attendance: ' || subj_name, 'Your attendance is ' || pct || '%. Attend the next ' || need || ' classes to reach 75%.', '/attendance/' || subj); end if; return new; end $$;
+
+create trigger trg_attendance_warning
+after insert
+or
+update on attendance_records for each row
+execute function check_attendance_warning ();
+
+-- ---------- 4. ASSIGNMENT + LAB FILE GRADING ----------
+alter table assignments
+add column if not exists kind text not null default 'assignment' check (kind in ('assignment', 'lab_file'));
+
+alter table assignments
+add column if not exists max_marks numeric(5, 2) not null default 10;
+
+alter table submissions
+add column if not exists status text not null default 'submitted' check (status in ('submitted', 'graded', 'resubmit'));
+
+alter table submissions
+add column if not exists graded_by uuid references profiles (id);
+
+alter table submissions
+add column if not exists graded_at timestamptz;
+
+create view my_grades as
+select
+  s.student_id,
+  a.id as assignment_id,
+  a.kind,
+  a.title,
+  sub.name as subject,
+  a.due_at,
+  s.submitted_at,
+  s.status,
+  s.grade,
+  a.max_marks,
+  s.feedback
+from
+  submissions s
+  join assignments a on a.id = s.assignment_id
+  join subjects sub on sub.id = a.subject_id
+where
+  s.student_id = auth.uid ();
+
+create or replace function notify_new_assignment () returns trigger language plpgsql security definer
+set
+  search_path = public as $$ declare sub subjects%rowtype; begin select * into sub from subjects where id = new.subject_id; insert into notifications (user_id, kind, title, body, link) select p.id, 'assignment', case when new.kind = 'lab_file' then 'New lab file: ' else 'New assignment: ' end || new.title, sub.name || case when new.due_at is not null then ' - due ' || to_char(new.due_at, 'DD Mon HH24:MI') else '' end, '/assignments/' || new.id from profiles p where p.role = 'student' and p.status = 'verified' and p.branch_id = sub.branch_id and p.year = (sub.semester + 1) / 2; return new; end $$;
+
+create trigger trg_new_assignment
+after insert on assignments for each row
+execute function notify_new_assignment ();
+
+create or replace function notify_graded () returns trigger language plpgsql security definer
+set
+  search_path = public as $$ declare a_title text; a_max numeric; begin if new.grade is distinct from old.grade and new.grade is not null then select title, max_marks into a_title, a_max from assignments where id = new.assignment_id; new.status    := 'graded'; new.graded_at := now(); new.graded_by := coalesce(new.graded_by, auth.uid()); perform notify(new.student_id, 'grade', 'Graded: ' || a_title, 'You scored ' || new.grade || ' / ' || a_max, '/assignments/' || new.assignment_id); end if; return new; end $$;
+
+create trigger trg_graded before
+update on submissions for each row
+execute function notify_graded ();
+
+-- ---------- 5. EVENT VERIFICATION NOTIFICATION ----------
+create or replace function notify_event_verified () returns trigger language plpgsql security definer
+set
+  search_path = public as $$ begin if new.status is distinct from old.status and new.status in ('verified','rejected') then perform notify(new.student_id, 'event', 'Participation ' || new.status, 'Your event participation was ' || new.status || '.', '/events/' || new.event_id); end if; return new; end $$;
+
+create trigger trg_event_verified
+after
+update on event_participants for each row
+execute function notify_event_verified ();
+
+-- ---------- 6. GLOBAL SEARCH ----------
+create or replace function global_search (q text) returns table (kind text, id uuid, title text, subtitle text) language sql stable security invoker
+set
+  search_path = public as $$ select * from ( select 'event'::text, e.id, e.title, coalesce(e.category,'') from events e where e.title ilike '%'||q||'%' or e.description ilike '%'||q||'%' union all select 'staff', s.id, s.full_name, s.designation from staff_directory s where s.full_name ilike '%'||q||'%' or s.designation ilike '%'||q||'%' or s.department ilike '%'||q||'%' union all select 'subject', sb.id, sb.name, sb.code from subjects sb where sb.name ilike '%'||q||'%' or sb.code ilike '%'||q||'%' union all select a.kind, a.id, a.title, 'Due ' || coalesce(to_char(a.due_at,'DD Mon'),'-') from assignments a where a.title ilike '%'||q||'%' union all select 'post', p.id, left(p.body, 80), '' from posts p where p.body ilike '%'||q||'%' ) r(kind, id, title, subtitle) limit 30; $$;
+
+-- ---------- 7. ONLINE COUNSELLING + SUBJECT DOUBTS ----------
+create type counsel_category as enum('subject_doubt', 'wellbeing', 'other');
+
+create type thread_status as enum('open', 'answered', 'closed');
+
+create table counselling_threads (
+  id uuid primary key default gen_random_uuid (),
+  student_id uuid not null references profiles (id) on delete cascade,
+  category counsel_category not null,
+  subject_id uuid references subjects (id),
+  title text not null,
+  is_anonymous boolean not null default true,
+  urgent boolean not null default false,
+  status thread_status not null default 'open',
+  created_at timestamptz default now()
+);
+
+create table counselling_messages (
+  id uuid primary key default gen_random_uuid (),
+  thread_id uuid not null references counselling_threads (id) on delete cascade,
+  sender text not null check (sender in ('student', 'staff')),
+  staff_name text,
+  body text not null check (char_length(body) <= 2000),
+  created_at timestamptz default now()
+);
