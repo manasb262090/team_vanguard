@@ -11,6 +11,7 @@ import {
 import { useState } from "react"
 import Brand from "../components/Brand"
 import type { Role } from "../types"
+import { supabase } from "../supabaseClient"
 
 type LoginPageProps = {
   darkMode: boolean
@@ -44,12 +45,82 @@ export default function LoginPage({
   const [role, setRole] = useState<Role>("student")
   const [signup, setSignup] = useState(false)
   const [email, setEmail] = useState("arjun.mehta@campus.edu")
+  const [password, setPassword] = useState("campusvault")
+  const [fullName, setFullName] = useState("")
+  const [loading, setLoading] = useState(false)
+
   const detectedStudent =
     role === "student"
       ? institutionalDirectory[
           (email.trim().toLowerCase() as keyof typeof institutionalDirectory)
         ]
       : null
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setLoading(true)
+
+    try {
+      if (signup) {
+        // 1. Handle Registration
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              full_name: fullName || "New User",
+              role: role, // Passes 'student' or 'teacher' to your database trigger
+              enrollment_no: detectedStudent?.studentId || null,
+            },
+          },
+        })
+
+        if (signUpError) throw signUpError
+
+        alert("Account created successfully! You can now sign in.")
+        setSignup(false)
+      } else {
+        // 2. Handle Login Authentication
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        })
+
+        if (authError) throw authError
+
+        // 3. Fetch role from database profiles table
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("role, status")
+          .eq("id", authData.user.id)
+          .single()
+
+        if (profileError || !profile) {
+          throw new Error("User profile not found in database.")
+        }
+
+        // 4. Validate tab role mismatch
+        if (role === "teacher" && profile.role === "student") {
+          alert("Access Denied: This account is registered as a Student, not a Teacher.")
+          await supabase.auth.signOut()
+          return
+        }
+
+        if (role === "student" && profile.role === "teacher") {
+          alert("Access Denied: Please use the Teacher login tab.")
+          await supabase.auth.signOut()
+          return
+        }
+
+        // 5. Trigger successful application login state
+        onLogin(profile.role)
+      }
+    } catch (error: any) {
+      alert("Authentication Error: " + (error.message || error))
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <div className="grid min-h-screen bg-white lg:grid-cols-[1.05fr_0.95fr] dark:bg-slate-950">
@@ -146,13 +217,7 @@ export default function LoginPage({
             ))}
           </div>
 
-          <form
-            className="space-y-5"
-            onSubmit={(event) => {
-              event.preventDefault()
-              onLogin(role)
-            }}
-          >
+          <form className="space-y-5" onSubmit={handleSubmit}>
             {signup && (
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
@@ -160,7 +225,9 @@ export default function LoginPage({
                 </span>
                 <input
                   className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:focus:ring-indigo-950"
+                  onChange={(event) => setFullName(event.target.value)}
                   placeholder="Your full name"
+                  value={fullName}
                   required
                 />
               </label>
@@ -174,6 +241,7 @@ export default function LoginPage({
                 onChange={(event) => setEmail(event.target.value)}
                 type="email"
                 value={email}
+                required
               />
             </label>
             {detectedStudent && (
@@ -216,15 +284,20 @@ export default function LoginPage({
               </span>
               <input
                 className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:focus:ring-indigo-950"
-                defaultValue="campusvault"
+                onChange={(event) => setPassword(event.target.value)}
                 type="password"
+                value={password}
+                required
               />
             </label>
             <button
-              className="group flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 text-sm font-semibold text-white transition hover:bg-indigo-600 dark:bg-white dark:text-slate-950 dark:hover:bg-indigo-400"
+              className="group flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 text-sm font-semibold text-white transition hover:bg-indigo-600 dark:bg-white dark:text-slate-950 dark:hover:bg-indigo-400 disabled:opacity-50"
+              disabled={loading}
               type="submit"
             >
-              {signup
+              {loading
+                ? "Processing..."
+                : signup
                 ? "Create account"
                 : `Continue as ${role === "student" ? "student" : "faculty"}`}
               <ArrowRight className="size-4 transition group-hover:translate-x-0.5" />
