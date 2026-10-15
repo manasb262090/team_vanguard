@@ -1,205 +1,61 @@
 import type { ReactNode } from "react"
-import { useState } from "react"
 import {
-  Award,
-  BarChart,
-  Bell as BellIcon,
-  BookOpen,
-  CalendarDays,
+  Bell,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Clock3,
-  CreditCard,
-  FileCheck2,
   FileText,
   GraduationCap,
-  HelpCircle,
   LayoutDashboard,
   LogOut,
-  Megaphone,
   Menu,
   MessageSquareText,
   Moon,
-  Search as SearchIcon,
+  Search,
   ShieldCheck,
-  Sparkles,
-  Star,
   Sun,
-  Trophy,
-  Users,
   UsersRound,
   X,
 } from "./icons"
+import { useState } from "react"
+import type { Role, View } from "../types"
 import Brand from "./Brand"
 import Modal from "./Modal"
-import { useStore, setState, visibleNotice } from "../store.js"
-import { timeAgo } from "../util.js"
-
-const TAB_ICONS: Record<string, any> = {
-  home: LayoutDashboard,
-  connect: UsersRound,
-  notices: Megaphone,
-  events: Award,
-  marks: BarChart,
-  attendance: Clock3,
-  assignments: FileCheck2,
-  timetable: CalendarDays,
-  leave: FileText,
-  fees: CreditCard,
-  lostfound: HelpCircle,
-  counselling: MessageSquareText,
-  documents: FileText,
-  staff: Users,
-  profile: GraduationCap,
-  people: UsersRound,
-  users: Users,
-  reports: BarChart,
-  teachers: GraduationCap,
-  feedback: Star,
-  assistant: Sparkles,
-  library: BookOpen,
-  sports: Trophy,
-  od: FileCheck2,
-}
-
-const GROUPS = [
-  {
-    title: "Core Workspace",
-    keys: ["home", "connect", "assistant", "notices", "documents", "profile"],
-  },
-  {
-    title: "Academics & Records",
-    keys: ["marks", "attendance", "assignments", "timetable", "events", "od", "leave"],
-  },
-  {
-    title: "Campus Services",
-    keys: ["library", "sports", "fees", "counselling", "lostfound", "staff", "feedback"],
-  },
-  {
-    title: "Administration",
-    keys: ["people", "users", "teachers", "reports"],
-  },
-]
 
 type AppShellProps = {
   children: ReactNode
-  user: any
-  tabs: [string, string][]
-  currentTab: string
-  onNavigate: (tabKey: string) => void
-  onMoveHistory: (direction: number) => void
-  canBack: boolean
-  canForward: boolean
+  currentView: View
   darkMode: boolean
-  onThemeToggle: () => void
+  role: Role
   onLogout: () => void
+  onNavigate: (view: View) => void
+  onThemeToggle: () => void
 }
+
+const navItems = [
+  { id: "dashboard" as const, label: "Overview", icon: LayoutDashboard },
+  { id: "feed" as const, label: "Campus feed", icon: UsersRound },
+  { id: "messages" as const, label: "Messages", icon: MessageSquareText },
+]
 
 export default function AppShell({
   children,
-  user,
-  tabs,
-  currentTab,
-  onNavigate,
-  onMoveHistory,
-  canBack,
-  canForward,
+  currentView,
   darkMode,
-  onThemeToggle,
+  role,
   onLogout,
+  onNavigate,
+  onThemeToggle,
 }: AppShellProps) {
-  const s = useStore()
   const [menuOpen, setMenuOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
-  const [bellOpen, setBellOpen] = useState(false)
-  const [snap, setSnap] = useState(0)
-  const [q, setQ] = useState("")
+  const profile =
+    role === "student"
+      ? { name: "Arjun Mehta", detail: "B.Tech · CSE", initials: "AM" }
+      : { name: "Dr. Maya Rao", detail: "Faculty · CSE", initials: "MR" }
 
-  const initials = (user?.name || "U")
-    .split(" ")
-    .map((w: string) => w[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase()
-
-  const userDetail =
-    user?.role === "student"
-      ? `${user.branch || "Campus"} · ${user.batch || ""} Sec ${user.section || ""}`
-      : `${user?.designation || user?.role?.replace("_", " ") || "Faculty"}${user?.dept ? ` · ${user.dept}` : ""}`
-
-  // Project A Search logic
-  const t = q.trim().toLowerCase()
-  const has = (x: string) => (x || "").toLowerCase().includes(t)
-  const searchResults = !t
-    ? []
-    : [
-        ...(user?.role !== "student"
-          ? s.users
-              .filter((u: any) => u.role === "student" && has(u.name))
-              .map((u: any) => ["Student", u.name, "people"])
-          : []),
-        ...(user?.role === "admin"
-          ? s.users
-              .filter((u: any) => u.role === "teacher" && has(u.name))
-              .map((u: any) => ["Teacher", u.name, "teachers"])
-          : []),
-        ...s.events.filter((e: any) => has(e.title)).map((e: any) => ["Event", e.title, "events"]),
-        ...s.assignments
-          .filter((a: any) => has(a.title))
-          .map((a: any) => ["Assignment", a.title, "assignments"]),
-        ...s.channels
-          .filter((c: any) => has(c.name))
-          .map((c: any) => [c.type === "club" ? "Club" : "Group", c.name, "connect"]),
-        ...s.notices
-          .filter((n: any) => visibleNotice(n, user) && has(n.title))
-          .map((n: any) => ["Notice", n.title, "notices"]),
-        ...s.staff
-          .filter((f: any) => has(f.name) || has(f.role))
-          .map((f: any) => ["Staff", `${f.name} · ${f.role}`, "staff"]),
-      ].slice(0, 8)
-
-  // Project A Notification Bell logic
-  const today = new Date().toISOString().slice(0, 10)
-  const loanAlerts = s.libraryIssues
-    .filter(
-      (issue: any) =>
-        issue.studentId === user?.id &&
-        issue.status === "issued" &&
-        issue.dueDate &&
-        issue.dueDate <= new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10)
-    )
-    .map((issue: any) => ({
-      id: "loan-reminder-" + issue.id,
-      userId: user.id,
-      text:
-        issue.dueDate < today
-          ? `${issue.bookTitle} is overdue. It was due ${issue.dueDate}.`
-          : `Return ${issue.bookTitle} by ${issue.dueDate}.`,
-      time: Date.parse(issue.dueDate + "T00:00:00") - 3 * 86400000,
-    }))
-  const mineAlerts = [
-    ...s.notifications.filter((n: any) => n.userId === "all" || n.userId === user?.id),
-    ...loanAlerts,
-  ].sort((a: any, b: any) => b.time - a.time)
-  const readAt = s.readAt[user?.id] || 0
-  const unread = mineAlerts.filter((n: any) => n.time > readAt).length
-
-  const toggleBell = () => {
-    if (!bellOpen && user?.id) {
-      setSnap(readAt)
-      setState((d: any) => ((d.readAt[user.id] = Date.now()), d))
-    }
-    setBellOpen(!bellOpen)
-  }
-
-  const navigate = (tabKey: string) => {
-    onNavigate(tabKey)
+  const navigate = (view: View) => {
+    onNavigate(view)
     setMenuOpen(false)
   }
-
-  const availableKeys = new Set(tabs?.map(([k]) => k) || [])
-  const tabLabelMap = Object.fromEntries(tabs?.map(([k, label]) => [k, label]) || [])
 
   return (
     <div className="min-h-screen bg-[#f6f6f2] text-slate-900 transition-colors dark:bg-slate-950 dark:text-slate-100">
@@ -220,67 +76,55 @@ export default function AppShell({
           </button>
         </div>
 
-        <div className="mt-6 flex-1 space-y-6 overflow-y-auto pr-1">
-          {GROUPS.map((group) => {
-            const groupTabs = group.keys.filter((k) => availableKeys.has(k))
-            if (groupTabs.length === 0) return null
-            return (
-              <div key={group.title}>
-                <p className="px-3 text-[10px] font-bold uppercase tracking-[0.22em] text-white/35">
-                  {group.title}
-                </p>
-                <nav className="mt-2 space-y-1">
-                  {groupTabs.map((key) => {
-                    const Icon = TAB_ICONS[key] || LayoutDashboard
-                    const active = key === currentTab
-                    return (
-                      <button
-                        className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
-                          active
-                            ? "bg-white text-slate-950 shadow-sm"
-                            : "text-white/60 hover:bg-white/7 hover:text-white"
-                        }`}
-                        key={key}
-                        onClick={() => navigate(key)}
-                        type="button"
-                      >
-                        <Icon className="size-[18px]" strokeWidth={1.8} />
-                        <span className="truncate">{tabLabelMap[key]}</span>
-                      </button>
-                    )
-                  })}
-                </nav>
-              </div>
-            )
-          })}
+        <div className="mt-12">
+          <p className="px-3 text-[10px] font-bold uppercase tracking-[0.22em] text-white/35">
+            Workspace
+          </p>
+          <nav className="mt-3 space-y-1">
+            {navItems.map((item) => {
+              const Icon = item.icon
+              const active = item.id === currentView
+              return (
+                <button
+                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition ${
+                    active
+                      ? "bg-white text-slate-950 shadow-sm"
+                      : "text-white/60 hover:bg-white/7 hover:text-white"
+                  }`}
+                  key={item.id}
+                  onClick={() => navigate(item.id)}
+                  type="button"
+                >
+                  <Icon className="size-[18px]" strokeWidth={1.8} />
+                  {item.label}
+                  {item.id === "messages" && (
+                    <span className="ml-auto grid size-5 place-items-center rounded-full bg-indigo-500 text-[10px] font-bold text-white">
+                      3
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </nav>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="mt-auto rounded-2xl border border-white/10 bg-white/5 p-4">
           <div className="mb-3 flex items-center gap-2 text-xs font-medium text-white/55">
             <GraduationCap className="size-4" />
             Academic year 2025–26
           </div>
-          <div className="flex items-center gap-3 border-t border-white/10 pt-3">
-            {user?.photo ? (
-              <img
-                src={user.photo}
-                alt={user?.name}
-                className="size-10 rounded-full object-cover"
-              />
-            ) : (
-              <div className="grid size-10 shrink-0 place-items-center rounded-full bg-indigo-500 text-xs font-bold">
-                {initials}
-              </div>
-            )}
+          <div className="flex items-center gap-3 border-t border-white/10 pt-4">
+            <div className="grid size-10 place-items-center rounded-full bg-indigo-500 text-xs font-bold">
+              {profile.initials}
+            </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold">{user?.name}</p>
-              <p className="truncate text-xs text-white/40">{userDetail}</p>
+              <p className="truncate text-sm font-semibold">{profile.name}</p>
+              <p className="truncate text-xs text-white/40">{profile.detail}</p>
             </div>
             <button
               aria-label="Log out"
               className="text-white/40 transition hover:text-white"
               onClick={onLogout}
-              title="Log out"
               type="button"
             >
               <LogOut className="size-4" />
@@ -299,6 +143,203 @@ export default function AppShell({
       )}
 
       <div className="lg:pl-72">
-        <header className="sticky top-0 z-20 flex h-20 items-center gap-2 border-b border-slate-200/80 bg-[#f6f6f2]/90 px-4 backdrop-blur-xl sm:px-8 dark:border-slate-800 dark:bg-slate-950/90">
+        <header className="sticky top-0 z-20 flex h-20 items-center border-b border-slate-200/80 bg-[#f6f6f2]/90 px-4 backdrop-blur-xl sm:px-8 dark:border-slate-800 dark:bg-slate-950/90">
           <button
-            aria-label="Open navigation
+            aria-label="Open navigation"
+            className="mr-3 grid size-10 place-items-center rounded-xl border border-slate-200 bg-white lg:hidden dark:border-slate-700 dark:bg-slate-900"
+            onClick={() => setMenuOpen(true)}
+            type="button"
+          >
+            <Menu className="size-5" />
+          </button>
+          <div className="relative hidden max-w-sm flex-1 sm:block">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+            <input
+              aria-label="Search portal"
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:focus:ring-indigo-950"
+              placeholder="Search people, files or communities..."
+            />
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              aria-label="Toggle color theme"
+              className="grid size-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:text-slate-950 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:text-white"
+              onClick={onThemeToggle}
+              type="button"
+            >
+              {darkMode ? (
+                <Sun className="size-4" />
+              ) : (
+                <Moon className="size-4" />
+              )}
+            </button>
+            <button
+              aria-label="Notifications"
+              className="relative grid size-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400"
+              type="button"
+            >
+              <Bell className="size-4" />
+              <span className="absolute right-2.5 top-2.5 size-1.5 rounded-full bg-indigo-500 ring-2 ring-white dark:ring-slate-900" />
+            </button>
+            <button
+              aria-label="Open student profile"
+              className="ml-1 hidden items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-semibold sm:flex"
+              onClick={() => setProfileOpen(true)}
+              type="button"
+            >
+              <span className="grid size-8 place-items-center overflow-hidden rounded-full bg-slate-950 text-[10px] text-white dark:bg-white dark:text-slate-950">
+                {role === "student" ? (
+                  <img
+                    alt="Arjun Mehta"
+                    className="size-full object-cover"
+                    src="https://images.unsplash.com/photo-1698510047345-ff32de8a3b74?crop=faces&fit=crop&fm=jpg&h=160&q=85&w=160"
+                  />
+                ) : (
+                  profile.initials
+                )}
+              </span>
+              <ChevronDown className="size-3.5 text-slate-400" />
+            </button>
+          </div>
+        </header>
+        <main className="mx-auto max-w-[1500px] p-4 sm:p-8 lg:p-10">
+          {children}
+        </main>
+      </div>
+      {profileOpen && (
+        <Modal
+          eyebrow={
+            role === "student" ? "Verified student profile" : "Faculty profile"
+          }
+          onClose={() => setProfileOpen(false)}
+          title={profile.name}
+        >
+          <div className="overflow-hidden rounded-2xl bg-slate-950 text-white">
+            <div className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center">
+              {role === "student" ? (
+                <img
+                  alt="Arjun Mehta student ID photograph"
+                  className="size-28 rounded-2xl border-2 border-white/20 object-cover"
+                  src="https://images.unsplash.com/photo-1698510047345-ff32de8a3b74?crop=faces&fit=crop&fm=jpg&h=320&q=90&w=320"
+                />
+              ) : (
+                <span className="grid size-28 place-items-center rounded-2xl bg-indigo-500 text-2xl font-bold">
+                  {profile.initials}
+                </span>
+              )}
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="font-display text-3xl">{profile.name}</p>
+                  <ShieldCheck className="size-5 text-emerald-400" />
+                </div>
+                <p className="mt-1 text-sm text-white/50">
+                  {role === "student"
+                    ? "B.Tech · Computer Science & Engineering"
+                    : "Associate Professor · Computer Science"}
+                </p>
+                <span className="mt-4 inline-flex rounded-full bg-emerald-400/15 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-300">
+                  Institution verified
+                </span>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 border-t border-white/10 sm:grid-cols-4">
+              {(role === "student"
+                ? [
+                    ["Student ID", "22CSE1048"],
+                    ["Section", "CSE–A"],
+                    ["Semester", "VI"],
+                    ["Admission", "2022"],
+                  ]
+                : [
+                    ["Faculty ID", "F-CSE-018"],
+                    ["Department", "CSE"],
+                    ["Office", "B-214"],
+                    ["Joined", "2018"],
+                  ]
+              ).map(([label, value]) => (
+                <div
+                  className="border-r border-white/10 p-4 last:border-0"
+                  key={label}
+                >
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-white/35">
+                    {label}
+                  </p>
+                  <p className="mt-1 text-xs font-semibold">{value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            {[
+              [
+                "Institutional email",
+                role === "student"
+                  ? "arjun.mehta@campus.edu"
+                  : "maya.rao@campus.edu",
+              ],
+              [
+                "Phone",
+                role === "student" ? "+91 98765 43210" : "+91 98110 24680",
+              ],
+              ["Date of birth", role === "student" ? "14 August 2004" : "—"],
+              [
+                "Academic status",
+                role === "student" ? "Active · Regular" : "Active faculty",
+              ],
+            ].map(([label, value]) => (
+              <div
+                className="rounded-xl border border-slate-200 p-3 dark:border-slate-700"
+                key={label}
+              >
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  {label}
+                </p>
+                <p className="mt-1 text-sm font-semibold">{value}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-6">
+            <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+              Quick actions
+            </p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <button
+                className="flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-3 py-3 text-xs font-semibold text-white dark:bg-white dark:text-slate-950"
+                onClick={() => {
+                  navigate("dashboard")
+                  setProfileOpen(false)
+                }}
+                type="button"
+              >
+                <FileText className="size-4" />
+                {role === "student" ? "Open my vault" : "Open dashboard"}
+              </button>
+              <button
+                className="rounded-xl border border-slate-200 px-3 py-3 text-xs font-semibold dark:border-slate-700"
+                onClick={() => {
+                  navigate("feed")
+                  setProfileOpen(false)
+                }}
+                type="button"
+              >
+                Campus activity
+              </button>
+              <button
+                className="rounded-xl border border-slate-200 px-3 py-3 text-xs font-semibold dark:border-slate-700"
+                onClick={() => {
+                  navigate("messages")
+                  setProfileOpen(false)
+                }}
+                type="button"
+              >
+                Open messages
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
