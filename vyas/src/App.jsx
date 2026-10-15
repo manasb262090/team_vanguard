@@ -12,7 +12,7 @@ import Library from './modules/src/modules/Library.jsx'
 import Sports from './modules/src/modules/Sports.jsx'
 import AttendanceOD from './modules/src/modules/AttendanceOD.jsx'
 import AppShell from './components/AppShell.tsx'   // <-- Remove .jsx extension here
-import Brand from './components/Brand.jsx'         // <-- Remove .jsx extension here
+import Brand from './components/Brand.tsx'         // <-- Remove .jsx extension here
 import {
   ArrowRight,
   BookOpen,
@@ -21,5 +21,5 @@ import {
   Moon,
   Sun,
   Users as UsersIcon,
-} from './components/icons'                      // <-- Remove .jsx extension here
+} from './components/icons.tsx'                      // <-- Remove .jsx extension here
 import './extra.css'
