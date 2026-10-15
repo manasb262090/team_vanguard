@@ -11,8 +11,8 @@ import { Users, Profile, Reports } from './admin.jsx'
 import Library from './modules/src/modules/Library.jsx'
 import Sports from './modules/src/modules/Sports.jsx'
 import AttendanceOD from './modules/src/modules/AttendanceOD.jsx'
-import AppShell from './components/AppShell'   // <-- Remove .jsx extension here
-import Brand from './components/Brand'         // <-- Remove .jsx extension here
+import AppShell from './components/AppShell.jsx'   // <-- Remove .jsx extension here
+import Brand from './components/Brand.jsx'         // <-- Remove .jsx extension here
 import {
   ArrowRight,
   BookOpen,
