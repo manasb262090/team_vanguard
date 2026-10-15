@@ -5,10 +5,7 @@ type BrandProps = {
   inverse?: boolean
 }
 
-export default function Brand({
-  compact = false,
-  inverse = false,
-}: BrandProps) {
+export default function Brand({ compact = false, inverse = false }: BrandProps) {
   return (
     <div className="flex items-center gap-3">
       <div
@@ -21,14 +18,12 @@ export default function Brand({
         <ShieldCheck className="size-5" strokeWidth={1.8} />
       </div>
       {!compact && (
-        <div
-          className={inverse ? "text-white" : "text-slate-950 dark:text-white"}
-        >
+        <div className={inverse ? "text-white" : "text-slate-950 dark:text-white"}>
           <p className="font-display text-lg leading-none tracking-tight">
             CampusVault
           </p>
           <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.22em] opacity-55">
-            & Connect
+            & Connect ERP
           </p>
         </div>
       )}
